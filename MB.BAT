@@ -1,4 +1,4 @@
-cd ..\tdl
-del objs\*.obj
+cd ..\tdl 
+del ..\tdl\objs\*.obj
 maker -B
-cd ..\tubes
+cd ..\tubes 
