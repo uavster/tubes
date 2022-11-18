@@ -4,6 +4,7 @@
 #include "pose3.hpp"
 #include "htmat4.hpp"
 #include "interp.hpp"
+#include "palette.hpp"
 
 #define kDisplayWidth	320
 #define kDisplayHeight	200
@@ -93,6 +94,9 @@ int main() {
 		error = -1;
 		goto error_exit;
 	}
+	SortSLIPaletteByLuminance(texture);
+	// Reserve 16 colors for on-texture lighting effects.	
+	CompressSLIPalette(texture, 0, 255, 0, 255-16);
 	CreateLitTableSLI(texture, BLACK2WHITE, 129);
 
 	const int num_points = kNumSections * kNumSectionPoints;
@@ -254,10 +258,13 @@ int main() {
 	StartFrameRate();
 	while(loop) {		
 		ClearCurrentFrame(back_buffer, 0);
+		SetRenderMethode(RENDER_SOLID);
+		// RenderUniverse(&world, back_buffer);
+		// SetRenderMethode(RENDER_LINE);
 		RenderUniverse(&world, back_buffer);
 		Blit(GetVideoSLI(), back_buffer);
 		ShowPage();
-		RotateMesh(0, t, &mesh);
+		RotateMesh(0, 0.2*t, &mesh);
 		IncFloat(&t, &t_inc);
 		GetElapsedTime();
 		IncFrameCounter();
