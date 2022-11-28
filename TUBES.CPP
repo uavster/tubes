@@ -48,6 +48,37 @@ void CalcPolyNormal(RENDERPOLY &p) {
 	p.OrigPNormal = p.PNormal;
 }
 
+int bright_bar_y = -1;
+
+void AnimateTexture(SLI *texture, SLI *original_texture, float new_time) {	
+	const int kBrightBarHeight = 10;
+	const float kBarFrequency = 0.1f;
+	
+	if (bright_bar_y >= 0) {
+		// Restore original colors.
+		BYTE *src = static_cast<BYTE *>(GetCurrentFramePtr(original_texture)) + bright_bar_y * original_texture->SLIPitch;
+		BYTE *dst = static_cast<BYTE *>(GetCurrentFramePtr(texture)) + bright_bar_y * texture->SLIPitch;
+		for (int y = 0; y < kBrightBarHeight; ++y) {
+			for (int x = 0; x < texture->SLIXSize; ++x, ++src, ++dst) {
+				*dst = *src;
+			}
+			dst += texture->SLIPitch - texture->SLIXSize;
+			src += original_texture->SLIPitch - original_texture->SLIXSize;
+		}
+	}
+	// Generate bright band.
+	// bright_bar_y = (texture->SLIYSize - kBrightBarHeight) * 0.5 * (sin(new_time * 2 * M_PI * kBarFrequency) + 1);
+	bright_bar_y = static_cast<int>(new_time * 100) % (texture->SLIYSize - kBrightBarHeight);
+	BYTE *dst = static_cast<BYTE *>(GetCurrentFramePtr(texture)) + bright_bar_y * texture->SLIPitch;
+	for (int y = 0; y < kBrightBarHeight; ++y) {
+		BYTE color = y + (255 - kBrightBarHeight);
+		for (int x = 0; x < texture->SLIXSize; ++x, ++dst) {
+			*dst = color;
+		}
+		dst += texture->SLIPitch - texture->SLIXSize;
+	}
+}
+
 int main() {
 	int error = 0;
 	add_key(&EscHandler, Key_ESC);
@@ -89,16 +120,41 @@ int main() {
 		goto error_exit;
 	}
 
-	SLI *texture = LoadGFX("texture.pcx", 8);
+	SLI *original_texture = NULL;
+	SLI *texture = NULL;
+	SLI *back_buffer = NULL;
+	
+	texture = LoadGFX("texture.pcx", 8);
 	if (texture == NULL) {
 		error = -1;
 		goto error_exit;
 	}
 	SortSLIPaletteByLuminance(texture);
+
+	const int kFxFirstIndex = 255 - 15;
+	const int kRampLength = 4;
+	const DWORD kFxColor = 0xffffc020;
+
 	// Reserve 16 colors for on-texture lighting effects.	
-	CompressSLIPalette(texture, 0, 255, 0, 255-16);
+	CompressSLIPalette(texture, 0, 255, 0, kFxFirstIndex - 1);
+	// Fill in the fx range with a constant color with alpha ramps.
+	vector<DWORD> fx_palette(256, 0);
+	CreateColorRamp(fx_palette.data(), kFxFirstIndex + kRampLength + 1, kFxColor, 255 - kRampLength - 1, kFxColor);
+	CreateColorRamp(fx_palette.data(), kFxFirstIndex, kFxColor & 0xffffff, kFxFirstIndex + kRampLength, kFxColor);
+	CreateColorRamp(fx_palette.data(), 255 - kRampLength, kFxColor, 255, kFxColor & 0xffffff);
+	
+	// Mix fx and texture palettes.
+	MixWithSLIPalette(texture, fx_palette.data());
+	
 	CreateLitTableSLI(texture, BLACK2WHITE, 129);
 
+	original_texture = CreateSLI(texture->SLIXSize, texture->SLIYSize, texture->SLIColorBits << 3, GetNumFrames(texture));
+	if (original_texture == NULL) {
+		error = -2;
+		goto error_exit;
+	}
+	Blit(original_texture, texture);
+	
 	const int num_points = kNumSections * kNumSectionPoints;
 	RENDERPOINT *points = new RENDERPOINT[num_points];
 	int i = 0;
@@ -246,7 +302,11 @@ int main() {
 
 	SetActiveCamera(&camera);
 	
-	SLI *back_buffer = CreateSLI(kDisplayWidth, kDisplayHeight, kDisplayBpp, 1);
+	back_buffer = CreateSLI(kDisplayWidth, kDisplayHeight, kDisplayBpp, 1);
+	if (back_buffer == NULL) {
+		error = -3;
+		goto error_exit;
+	}
 	error = CreateVideoSLI(kDisplayWidth, kDisplayHeight, kDisplayBpp);
 	if (error) {
 		goto error_exit;
@@ -256,9 +316,10 @@ int main() {
 	float light_target_x = 0, light_target_y = 0, light_target_z = 0;	
 	float t = 0.0f, t_inc = 0.01f;
 	StartFrameRate();
-	while(loop) {		
+	while(loop) {
 		ClearCurrentFrame(back_buffer, 0);
 		SetRenderMethode(RENDER_SOLID);
+		AnimateTexture(texture, original_texture, t);
 		// RenderUniverse(&world, back_buffer);
 		// SetRenderMethode(RENDER_LINE);
 		RenderUniverse(&world, back_buffer);
@@ -272,10 +333,25 @@ int main() {
 	StopFrameRate();
 
 error_exit:
+// printf("1\n"); getch();
 	DestroyVideoSLI(3);
 	if (error) {
 		printf("Error code: 0x%dhn\n", error);
 	}
+// printf("2\n"); getch();
+	if (back_buffer != NULL) {
+		DestroySLI(back_buffer);
+	}
+// printf("3\n"); getch();
+	if (texture != NULL) {
+		DestroySLI(texture);
+	}
+// printf("4\n"); getch();
+	if (original_texture != NULL) {
+		DestroySLI(original_texture);
+	}
+// printf("5\n"); getch();
 	ShowFrameRateResult();
+// printf("6\n"); getch();
 	return error;
 }
