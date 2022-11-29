@@ -62,20 +62,29 @@ void AnimateTexture(SLI *texture, SLI *original_texture, float new_time) {
 			for (int x = 0; x < texture->SLIXSize; ++x, ++src, ++dst) {
 				*dst = *src;
 			}
-			dst += texture->SLIPitch - texture->SLIXSize;
-			src += original_texture->SLIPitch - original_texture->SLIXSize;
+			if (y < texture->SLIYSize) {
+				dst += texture->SLIPitch - texture->SLIXSize;
+				src += original_texture->SLIPitch - original_texture->SLIXSize;
+			} else {
+				src = static_cast<BYTE *>(GetCurrentFramePtr(original_texture));
+				dst = static_cast<BYTE *>(GetCurrentFramePtr(texture));
+			}
 		}
 	}
 	// Generate bright band.
 	// bright_bar_y = (texture->SLIYSize - kBrightBarHeight) * 0.5 * (sin(new_time * 2 * M_PI * kBarFrequency) + 1);
-	bright_bar_y = static_cast<int>(new_time * 100) % (texture->SLIYSize - kBrightBarHeight);
+	bright_bar_y = static_cast<int>(new_time * 100) % texture->SLIYSize;
 	BYTE *dst = static_cast<BYTE *>(GetCurrentFramePtr(texture)) + bright_bar_y * texture->SLIPitch;
 	for (int y = 0; y < kBrightBarHeight; ++y) {
 		BYTE color = y + (255 - kBrightBarHeight);
 		for (int x = 0; x < texture->SLIXSize; ++x, ++dst) {
 			*dst = color;
 		}
-		dst += texture->SLIPitch - texture->SLIXSize;
+		if (y < texture->SLIYSize) {
+			dst += texture->SLIPitch - texture->SLIXSize;
+		} else {
+			dst = static_cast<BYTE *>(GetCurrentFramePtr(texture));
+		}
 	}
 }
 
@@ -113,7 +122,7 @@ int main() {
 	const int kNumSectionPoints = 5;
 	const float kTextureFactorX = 0.25;
 	// const float kTextureFactorY = kNumSections / 5.0f;
-	const float kTextureHeightMeters = 4;
+	const float kTextureHeightMeters = 5.8;
 	
 	if (kNumSections < 2) {
 		printf("kNumSections must be >= 3.");
@@ -133,7 +142,7 @@ int main() {
 
 	const int kFxFirstIndex = 255 - 15;
 	const int kRampLength = 4;
-	const DWORD kFxColor = 0xffffc020;
+	const DWORD kFxColor = 0xffffe080;
 
 	// Reserve 16 colors for on-texture lighting effects.	
 	CompressSLIPalette(texture, 0, 255, 0, kFxFirstIndex - 1);
@@ -146,7 +155,15 @@ int main() {
 	// Mix fx and texture palettes.
 	MixWithSLIPalette(texture, fx_palette.data());
 	
-	CreateLitTableSLI(texture, BLACK2WHITE, 129);
+	const int kLightingLevels = 129;
+	CreateLitTableSLI(texture, BLACK2WHITE, kLightingLevels);
+	
+	// Set all lighting levels to max in table to remove shadows.
+	for (int p = 0; p < kLightingLevels; ++p) {
+		for (int q = kFxFirstIndex; q <= 255; ++q) {
+			((DWORD *)(texture->SLILitTable))[(p << 8) + q] = kFxColor;
+		}
+	}
 
 	original_texture = CreateSLI(texture->SLIXSize, texture->SLIYSize, texture->SLIColorBits << 3, GetNumFrames(texture));
 	if (original_texture == NULL) {
