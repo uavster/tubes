@@ -54,6 +54,7 @@ void AnimateTexture(SLI *texture, SLI *original_texture, float new_time) {
 	const int kBrightBarHeight = 10;
 	const float kBarFrequency = 0.1f;
 	
+	const BYTE *max_dst = static_cast<BYTE *>(GetCurrentFramePtr(texture)) + texture->SLIYSize * texture->SLIPitch;
 	if (bright_bar_y >= 0) {
 		// Restore original colors.
 		BYTE *src = static_cast<BYTE *>(GetCurrentFramePtr(original_texture)) + bright_bar_y * original_texture->SLIPitch;
@@ -62,17 +63,15 @@ void AnimateTexture(SLI *texture, SLI *original_texture, float new_time) {
 			for (int x = 0; x < texture->SLIXSize; ++x, ++src, ++dst) {
 				*dst = *src;
 			}
-			if (y < texture->SLIYSize) {
-				dst += texture->SLIPitch - texture->SLIXSize;
-				src += original_texture->SLIPitch - original_texture->SLIXSize;
-			} else {
-				src = static_cast<BYTE *>(GetCurrentFramePtr(original_texture));
+			dst += texture->SLIPitch - texture->SLIXSize;
+			src += original_texture->SLIPitch - original_texture->SLIXSize;
+			if (dst >= max_dst) {
 				dst = static_cast<BYTE *>(GetCurrentFramePtr(texture));
+				src = static_cast<BYTE *>(GetCurrentFramePtr(original_texture));
 			}
 		}
 	}
 	// Generate bright band.
-	// bright_bar_y = (texture->SLIYSize - kBrightBarHeight) * 0.5 * (sin(new_time * 2 * M_PI * kBarFrequency) + 1);
 	bright_bar_y = static_cast<int>(new_time * 100) % texture->SLIYSize;
 	BYTE *dst = static_cast<BYTE *>(GetCurrentFramePtr(texture)) + bright_bar_y * texture->SLIPitch;
 	for (int y = 0; y < kBrightBarHeight; ++y) {
@@ -80,11 +79,25 @@ void AnimateTexture(SLI *texture, SLI *original_texture, float new_time) {
 		for (int x = 0; x < texture->SLIXSize; ++x, ++dst) {
 			*dst = color;
 		}
-		if (y < texture->SLIYSize) {
-			dst += texture->SLIPitch - texture->SLIXSize;
-		} else {
+		dst += texture->SLIPitch - texture->SLIXSize;
+		if (dst >= max_dst) {
 			dst = static_cast<BYTE *>(GetCurrentFramePtr(texture));
 		}
+	}
+}
+
+void MakeLightsGlow(SLI *sli, Pose3Interpolator &pose_interpolator, RENDERCAMERA &camera, float time) {
+	Pose3 pose = pose_interpolator.getValue(time);
+	RENDERPOINT point;
+	point.PointPos.x = pose.position().x;
+	point.PointPos.y = pose.position().y;
+	point.PointPos.z = pose.position().z;
+	POINT2D projection;
+	ProjectPointOnCamera(&point, &camera, &projection);
+	int py = static_cast<int>(projection.y);
+	int px = static_cast<int>(projection.x);
+	if (py >= 0 && py < sli->SLIYSize && px >= 0 && px < sli->SLIXSize) {
+		static_cast<DWORD *>(GetCurrentFramePtr(sli))[py * sli->SLIPitch + px] = 0xffffffff;
 	}
 }
 
@@ -337,9 +350,8 @@ int main() {
 		ClearCurrentFrame(back_buffer, 0);
 		SetRenderMethode(RENDER_SOLID);
 		AnimateTexture(texture, original_texture, t);
-		// RenderUniverse(&world, back_buffer);
-		// SetRenderMethode(RENDER_LINE);
 		RenderUniverse(&world, back_buffer);
+		MakeLightsGlow(back_buffer, pose_interpolator, camera, t);
 		Blit(GetVideoSLI(), back_buffer);
 		ShowPage();
 		RotateMesh(0, 0.2*t, &mesh);
@@ -350,25 +362,19 @@ int main() {
 	StopFrameRate();
 
 error_exit:
-// printf("1\n"); getch();
 	DestroyVideoSLI(3);
 	if (error) {
 		printf("Error code: 0x%dhn\n", error);
 	}
-// printf("2\n"); getch();
 	if (back_buffer != NULL) {
 		DestroySLI(back_buffer);
 	}
-// printf("3\n"); getch();
 	if (texture != NULL) {
 		DestroySLI(texture);
 	}
-// printf("4\n"); getch();
 	if (original_texture != NULL) {
 		DestroySLI(original_texture);
 	}
-// printf("5\n"); getch();
 	ShowFrameRateResult();
-// printf("6\n"); getch();
 	return error;
 }
