@@ -87,7 +87,7 @@ void AnimateTexture(SLI *texture, SLI *original_texture, float new_time) {
 }
 
 void MakeLightsGlow(SLI *sli, Pose3Interpolator &pose_interpolator, RENDERCAMERA &camera, float time) {
-	Pose3 pose = pose_interpolator.getValue(time);
+	Pose3 pose = pose_interpolator.getValue(time - 0.5);
 	RENDERPOINT point;
 	point.PointPos.x = pose.position().x;
 	point.PointPos.y = pose.position().y;
@@ -291,26 +291,14 @@ int main() {
 	mesh.polydata = polys;
 	mesh.points = num_points;
 	mesh.pointdata = points;
-	mesh.Pivot.x = 0.1;
-	mesh.Pivot.y = 0;
-	mesh.Pivot.z = 1;
+	mesh.Pivot.x = 0;
+	mesh.Pivot.y = 1;
+	mesh.Pivot.z = 0;
 	mesh.MeshName[0] = '1';
 	mesh.MeshName[1] = '\0';
 	
 	RENDERCAMERA camera;
-	camera.CamPos.x = 0; //2;
-	camera.CamPos.y = 0.2; //1.1;
-	camera.CamPos.z = -2; //-2;
-	camera.CamOrientation.x = 0; //-3.14159 / 4;
-	camera.CamOrientation.y = -3.14159 / 6; //-3.14159 / 8;
-	camera.CamOrientation.z = 0; //0;
 	camera.CamFocus = 200;
-	camera.sin_alpha = sin(camera.CamOrientation.x);
-	camera.cos_alpha = cos(camera.CamOrientation.x);
-	camera.sin_beta = sin(camera.CamOrientation.y);
-	camera.cos_beta = cos(camera.CamOrientation.y);
-	camera.sin_gamma = sin(camera.CamOrientation.z);
-	camera.cos_gamma = cos(camera.CamOrientation.z);
 	camera.CamName[0] = 'c';
 	camera.CamName[1] = '\0';
 	
@@ -347,6 +335,11 @@ int main() {
 	float t = 0.0f, t_inc = 0.01f;
 	StartFrameRate();
 	while(loop) {
+		const float kCamPosRadius = 4;
+		SetCameraPos(mesh.Pivot.x + kCamPosRadius * cos(t), mesh.Pivot.y, mesh.Pivot.z + kCamPosRadius * sin(t), &camera);
+		SetCameraTarget(mesh.Pivot.x, mesh.Pivot.y - 4, mesh.Pivot.z, &camera);
+		SetLightPos(mesh.Pivot.x + kCamPosRadius * cos(t + M_PI), mesh.Pivot.y, mesh.Pivot.z + kCamPosRadius * sin(t + M_PI), &light);
+		SetLightTarget(0, 0, 0, &light);
 		ClearCurrentFrame(back_buffer, 0);
 		SetRenderMethode(RENDER_SOLID);
 		AnimateTexture(texture, original_texture, t);
@@ -354,9 +347,8 @@ int main() {
 		MakeLightsGlow(back_buffer, pose_interpolator, camera, t);
 		Blit(GetVideoSLI(), back_buffer);
 		ShowPage();
-		RotateMesh(0, 0.2*t, &mesh);
-		IncFloat(&t, &t_inc);
 		GetElapsedTime();
+		IncFloat(&t, &t_inc);
 		IncFrameCounter();
 	}
 	StopFrameRate();
