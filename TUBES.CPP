@@ -10,6 +10,10 @@
 #define kDisplayHeight	200
 #define kDisplayBpp		32
 
+#define kSectionRadius	0.2f
+
+#define kGlowingBandSpeed	100	// pixels/second
+
 volatile bool loop = true;
 
 int EscHandler() {
@@ -52,7 +56,6 @@ int bright_bar_y = -1;
 
 void AnimateTexture(SLI *texture, SLI *original_texture, float new_time) {	
 	const int kBrightBarHeight = 10;
-	const float kBarFrequency = 0.1f;
 	
 	const BYTE *max_dst = static_cast<BYTE *>(GetCurrentFramePtr(texture)) + texture->SLIYSize * texture->SLIPitch;
 	if (bright_bar_y >= 0) {
@@ -72,7 +75,7 @@ void AnimateTexture(SLI *texture, SLI *original_texture, float new_time) {
 		}
 	}
 	// Generate bright band.
-	bright_bar_y = static_cast<int>(new_time * 100) % texture->SLIYSize;
+	bright_bar_y = static_cast<int>(new_time * kGlowingBandSpeed) % texture->SLIYSize;
 	BYTE *dst = static_cast<BYTE *>(GetCurrentFramePtr(texture)) + bright_bar_y * texture->SLIPitch;
 	for (int y = 0; y < kBrightBarHeight; ++y) {
 		BYTE color = y + (255 - kBrightBarHeight);
@@ -86,18 +89,26 @@ void AnimateTexture(SLI *texture, SLI *original_texture, float new_time) {
 	}
 }
 
-void MakeLightsGlow(SLI *sli, Pose3Interpolator &pose_interpolator, RENDERCAMERA &camera, float time) {
-	Pose3 pose = pose_interpolator.getValue(time - 0.5);
-	RENDERPOINT point;
-	point.PointPos.x = pose.position().x;
-	point.PointPos.y = pose.position().y;
-	point.PointPos.z = pose.position().z;
-	POINT2D projection;
-	ProjectPointOnCamera(&point, &camera, &projection);
-	int py = static_cast<int>(projection.y);
-	int px = static_cast<int>(projection.x);
-	if (py >= 0 && py < sli->SLIYSize && px >= 0 && px < sli->SLIXSize) {
-		static_cast<DWORD *>(GetCurrentFramePtr(sli))[py * sli->SLIPitch + px] = 0xffffffff;
+void MakeLightsGlow(SLI *sli, Pose3Interpolator &pose_interpolator, RENDERCAMERA &camera, float time, Interpolator<float> &t_from_text_v, const SLI *texture_sli) {
+	for (int i = 0; i < 3; ++i) {
+		Pose3 pose = pose_interpolator.getValue(t_from_text_v.getValue(time * kGlowingBandSpeed + texture_sli->SLIYSize * i)); //(5.5 / 5.8));
+		RENDERPOINT point;
+		point.PointPos.x = pose.position().x;
+		point.PointPos.y = pose.position().y;
+		point.PointPos.z = pose.position().z;
+		POINT2D projection;
+		ProjectPointOnCamera(&point, &camera, &projection);
+		int py = static_cast<int>(projection.y);
+		int px = static_cast<int>(projection.x);
+		float point_cam_dx = camera.CamPos.x - point.PointPos.x;
+		float point_cam_dy = camera.CamPos.y - point.PointPos.y;
+		float point_cam_dz = camera.CamPos.z - point.PointPos.z;
+		float point_cam_distance = point_cam_dx * point_cam_dx + point_cam_dy * point_cam_dy + point_cam_dz * point_cam_dz;
+		const int side = camera.CamFocus * 1.5f / (point_cam_distance + kSectionRadius * 0.5f) + 5;
+		DrawLine(sli, px - side, py - side, px + side, py - side, 0xffffffff);
+		DrawLine(sli, px - side, py - side, px - side, py + side, 0xffffffff);
+		DrawLine(sli, px - side, py + side, px + side, py + side, 0xffffffff);
+		DrawLine(sli, px + side, py - side, px + side, py + side, 0xffffffff);
 	}
 }
 
@@ -131,7 +142,6 @@ int main() {
 	float trajectory_end_t = (--pose_trajectory.cend())->time();
 	float trajectory_length = trajectory_end_t - trajectory_start_t;
 	const int kNumSections = 80;
-	const float kSectionRadius = 0.2f;
 	const int kNumSectionPoints = 5;
 	const float kTextureFactorX = 0.25;
 	// const float kTextureFactorY = kNumSections / 5.0f;
@@ -185,15 +195,21 @@ int main() {
 	}
 	Blit(original_texture, texture);
 	
+	TimeSignal<float> t_from_text_y_signal;
+	CubicCatmullRomInterpolator<float> t_from_text_y(t_from_text_y_signal);
+	
 	const int num_points = kNumSections * kNumSectionPoints;
 	RENDERPOINT *points = new RENDERPOINT[num_points];
 	int i = 0;
 	Vector3 last_section_center = pose_interpolator.getValue(0).position();
 	float distance_over_curve = 0;
 	for (int n = 0; n < kNumSections; ++n)  {
-		Pose3 pose = pose_interpolator.getValue(trajectory_start_t + (trajectory_length * n) / (kNumSections - 1));
+		float t = trajectory_start_t + (trajectory_length * n) / (kNumSections - 1);
+		Pose3 pose = pose_interpolator.getValue(t);
 		HTMatrix4 htm(pose.orientation().getRotMatrix(), pose.position());
 		distance_over_curve += (pose.position() - last_section_center).modulus();
+		float texture_y = (distance_over_curve * texture->SLIYSize) / kTextureHeightMeters;
+		t_from_text_y_signal.addKeyPoint(texture_y, t);
 		// Sample the shape to create points around the current pose.
 		for (int a = 0; a < kNumSectionPoints; ++a) {
 			float angle = -M_PI + (a * 2 * M_PI) / kNumSectionPoints;
@@ -203,7 +219,7 @@ int main() {
 			points[i].PointPos.z = point.z;
 			// Texture coordinates.
 			points[i].Properties.TextureCoordinates.x = static_cast<DWORD>((((a % kNumSectionPoints) * texture->SLIXSize * kTextureFactorX) / kNumSectionPoints)) % texture->SLIXSize;
-			points[i].Properties.TextureCoordinates.y = (distance_over_curve * texture->SLIYSize) / kTextureHeightMeters; //pose.position() static_cast<DWORD>((((j / kNumSectionPoints) * texture->SLIYSize * kTextureFactorY) / kNumSections)) % texture->SLIYSize;
+			points[i].Properties.TextureCoordinates.y = texture_y; //pose.position() static_cast<DWORD>((((j / kNumSectionPoints) * texture->SLIYSize * kTextureFactorY) / kNumSections)) % texture->SLIYSize;
 			++i;
 		}
 		last_section_center = pose.position();
@@ -344,7 +360,7 @@ int main() {
 		SetRenderMethode(RENDER_SOLID);
 		AnimateTexture(texture, original_texture, t);
 		RenderUniverse(&world, back_buffer);
-		MakeLightsGlow(back_buffer, pose_interpolator, camera, t);
+		MakeLightsGlow(back_buffer, pose_interpolator, camera, t, t_from_text_y, texture);
 		Blit(GetVideoSLI(), back_buffer);
 		ShowPage();
 		GetElapsedTime();
