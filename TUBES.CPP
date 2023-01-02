@@ -133,13 +133,14 @@ int main() {
 	
 	pose_trajectory.addKeyPoint(4.75f, Pose3(Vector3(-1, -1.3-2, 1.5), Quaternion(Vector3(0.75, 0, 0.25), M_PI)));
 	pose_trajectory.addKeyPoint(5.25f, Pose3(Vector3(-0.5, -1.3-1, 0.3), Quaternion(Vector3(0.75, 0, 0.25), 1.25*M_PI)));
-	pose_trajectory.addKeyPoint(5.5, Pose3(Vector3(0, -1.3, 0), Quaternion(Vector3(0.5, 0, 0.5), -0.5*M_PI)));
+	const float kLastToFirstKeypointTime = 0.25f;
+	pose_trajectory.setPeriodic(kLastToFirstKeypointTime);
 
 	Pose3CubicCatmullRomInterpolator pose_interpolator;
 	pose_interpolator.setTrajectory(pose_trajectory);
 	
 	float trajectory_start_t = pose_trajectory.cbegin()->time();
-	float trajectory_end_t = (--pose_trajectory.cend())->time();
+	float trajectory_end_t = (--pose_trajectory.cend())->time() + kLastToFirstKeypointTime;
 	float trajectory_length = trajectory_end_t - trajectory_start_t;
 	const int kNumSections = 80;
 	const int kNumSectionPoints = 5;
@@ -196,7 +197,12 @@ int main() {
 	Blit(original_texture, texture);
 	
 	TimeSignal<float> t_from_text_y_signal;
-	CubicCatmullRomInterpolator<float> t_from_text_y(t_from_text_y_signal);
+	t_from_text_y_signal.setPeriodic(/*last_to_first_keypoint_time=*/0);
+	// Cannot be a periodic cubic interpolator because there is a step between 
+	// end and start that produces ripple in the interpolated values around it.
+	// The ripple results in negative values and the location of each band
+	// dashes suddenly back when passing over the tube's origin.
+	LinearInterpolator<float> t_from_text_y(t_from_text_y_signal);
 	
 	const int num_points = kNumSections * kNumSectionPoints;
 	RENDERPOINT *points = new RENDERPOINT[num_points];
