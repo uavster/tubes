@@ -14,6 +14,10 @@
 
 #define kGlowingBandSpeed	100	// pixels/second
 
+#define kFxFirstIndex 	(255 - 15)
+#define kRampLength		4
+#define kFxColor		0xffffe080
+
 volatile bool loop = true;
 
 int EscHandler() {
@@ -89,8 +93,12 @@ void AnimateTexture(SLI *texture, SLI *original_texture, float new_time) {
 	}
 }
 
-void MakeLightsGlow(SLI *sli, Pose3Interpolator &pose_interpolator, RENDERCAMERA &camera, float time, Interpolator<float> &t_from_text_v, const SLI *texture_sli) {
-	for (int i = 0; i < 3; ++i) {
+void MakeLightsGlow(SLI *sli, Pose3Interpolator &pose_interpolator, RENDERCAMERA &camera, float time, Interpolator<float> &t_from_text_v, const SLI *texture_sli, int num_bands, DWORD *band_palette) {
+	DWORD *sli_data = static_cast<DWORD *>(GetCurrentFramePtr(sli));
+	int glow_sli_pos = 0;
+	SLR rect[16]; // Max bands
+	SLI *glow_sli[16]; // Max bands
+	for (int i = 0; i < num_bands; ++i) {
 		Pose3 pose = pose_interpolator.getValue(t_from_text_v.getValue(time * kGlowingBandSpeed + texture_sli->SLIYSize * i)); //(5.5 / 5.8));
 		RENDERPOINT point;
 		point.PointPos.x = pose.position().x;
@@ -105,10 +113,70 @@ void MakeLightsGlow(SLI *sli, Pose3Interpolator &pose_interpolator, RENDERCAMERA
 		float point_cam_dz = camera.CamPos.z - point.PointPos.z;
 		float point_cam_distance = point_cam_dx * point_cam_dx + point_cam_dy * point_cam_dy + point_cam_dz * point_cam_dz;
 		const int side = camera.CamFocus * 1.5f / (point_cam_distance + kSectionRadius * 0.5f) + 5;
-		DrawLine(sli, px - side, py - side, px + side, py - side, 0xffffffff);
-		DrawLine(sli, px - side, py - side, px - side, py + side, 0xffffffff);
-		DrawLine(sli, px - side, py + side, px + side, py + side, 0xffffffff);
-		DrawLine(sli, px + side, py - side, px + side, py + side, 0xffffffff);
+		
+		int first_y = (py - side > 0) ? py - side : 0;
+		int last_y = (py + side < sli->SLIYSize) ? py + side : sli->SLIYSize - 1;
+		int first_x = (px - side > 0) ? px - side : 0;
+		int last_x = (px + side < sli->SLIXSize) ? px + side : sli->SLIXSize - 1;
+		glow_sli[i] = CreateSLI(last_x - first_x + 1, last_y - first_y + 1, 8, 1);		
+		if (glow_sli[i] == NULL) {
+			return;
+		}
+		for (int y = first_y; y < last_y; ++y) {
+			BYTE *glow_data_ptr0 = static_cast<BYTE *>(GetCurrentFramePtr(glow_sli[i])) + glow_sli[i]->SLIPitch * (y - first_y);
+			DWORD *p0 = &sli_data[sli->SLIPitch * y];
+			const SPAN *span = GetFirstSpanInLine(sli, y);
+			while((DWORD)span != -1) {
+				if (span->SPX2 > first_x && span->SPX1 < last_x) {
+					BYTE *glow_data_ptr = glow_data_ptr0 + (span->SPX1 - first_x);
+					DWORD *p = p0 + (span->SPX1 > first_x ? span->SPX1 : first_x);
+					DWORD *p1 = p0 + (span->SPX2 < last_x ? span->SPX2 : last_x);
+					if (*p >= kFxColor) {
+						if (*p1 >= kFxColor) {
+							while(p <= p1) { *(glow_data_ptr++) = (int)*(p++) >> 16; }
+						} else {
+							while(p <= p1 && *p >= kFxColor) { *(glow_data_ptr++) = (int)*(p++) >> 16; }
+						}
+					} else {
+						if (*p1 >= kFxColor) {
+							while(p <= p1 && *p < kFxColor) { ++glow_data_ptr; ++p; }
+							while(p <= p1) { *(glow_data_ptr++) = (int)*(p++) >> 16; }
+						}
+					}
+				}
+				span = (const SPAN *)span->SPNext;
+			}
+		}
+		SetPos(glow_sli[i], glow_sli_pos, 0);
+		glow_sli_pos += 2 * side + 1;
+
+		rect[i].SLRR1.SLPX = first_x;
+		rect[i].SLRR1.SLPY = first_y;
+		rect[i].SLRR2.SLPX = last_x;
+		rect[i].SLRR2.SLPY = last_y;
+	}
+	SLI *glow_sli_smoothed[16];
+	for (int h = 0; h < num_bands; ++h) {
+		glow_sli_smoothed[h] = CreateSLI(glow_sli[h]->SLIXSize, glow_sli[h]->SLIYSize, 8, 1);
+		SetPos(glow_sli_smoothed[h], glow_sli[h]->SLIPos.SLRR1.SLPX, glow_sli[h]->SLIPos.SLRR1.SLPY);
+		SetPalette(glow_sli_smoothed[h], (BYTE *)band_palette);
+		Soften8((BYTE *)GetCurrentFramePtr(glow_sli[h]) + glow_sli[h]->SLIXSize * 2, glow_sli[h]->SLIXSize, glow_sli[h]->SLIYSize - 4, (BYTE *)GetCurrentFramePtr(glow_sli_smoothed[h]) + glow_sli_smoothed[h]->SLIXSize * 2);
+		Soften8((BYTE *)GetCurrentFramePtr(glow_sli_smoothed[h]) + glow_sli_smoothed[h]->SLIXSize * 2, glow_sli_smoothed[h]->SLIXSize, glow_sli_smoothed[h]->SLIYSize - 4, (BYTE *)GetCurrentFramePtr(glow_sli[h]) + glow_sli[h]->SLIXSize * 2);
+		Soften8((BYTE *)GetCurrentFramePtr(glow_sli[h]) + glow_sli[h]->SLIXSize * 2, glow_sli[h]->SLIXSize, glow_sli[h]->SLIYSize - 4, (BYTE *)GetCurrentFramePtr(glow_sli_smoothed[h]) + glow_sli_smoothed[h]->SLIXSize * 2);
+		DestroySLI(glow_sli[h]);
+	}
+	static DWORD band_rect_colors[] = { 0xffff0000, 0xff00ff00, 0xff0000ff };
+	for (int j = 0; j < num_bands; ++j) {
+		DrawLine(sli, rect[j].SLRR1.SLPX, rect[j].SLRR1.SLPY, rect[j].SLRR2.SLPX, rect[j].SLRR1.SLPY, band_rect_colors[j]);
+		DrawLine(sli, rect[j].SLRR1.SLPX, rect[j].SLRR1.SLPY, rect[j].SLRR1.SLPX, rect[j].SLRR2.SLPY, band_rect_colors[j]);
+		DrawLine(sli, rect[j].SLRR1.SLPX, rect[j].SLRR2.SLPY, rect[j].SLRR2.SLPX, rect[j].SLRR2.SLPY, band_rect_colors[j]);
+		DrawLine(sli, rect[j].SLRR2.SLPX, rect[j].SLRR1.SLPY, rect[j].SLRR2.SLPX, rect[j].SLRR2.SLPY, band_rect_colors[j]);		
+		Blit(sli, glow_sli_smoothed[j]);
+		DrawLine(sli, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPY, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPY, band_rect_colors[j]);
+		DrawLine(sli, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPY, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPY, band_rect_colors[j]);
+		DrawLine(sli, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPY, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPY, band_rect_colors[j]);
+		DrawLine(sli, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPY, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPY, band_rect_colors[j]);		
+		DestroySLI(glow_sli_smoothed[j]);
 	}
 }
 
@@ -147,6 +215,12 @@ int main() {
 	const float kTextureFactorX = 0.25;
 	// const float kTextureFactorY = kNumSections / 5.0f;
 	const float kTextureHeightMeters = 5.8;
+
+/*	
+	SLI *band_slis[32];	// Max bands
+	int num_bright_bands = 0;
+	void *band_frame_data = NULL;
+*/
 	
 	if (kNumSections < 2) {
 		printf("kNumSections must be >= 3.");
@@ -164,17 +238,13 @@ int main() {
 	}
 	SortSLIPaletteByLuminance(texture);
 
-	const int kFxFirstIndex = 255 - 15;
-	const int kRampLength = 4;
-	const DWORD kFxColor = 0xffffe080;
-
 	// Reserve 16 colors for on-texture lighting effects.	
 	CompressSLIPalette(texture, 0, 255, 0, kFxFirstIndex - 1);
 	// Fill in the fx range with a constant color with alpha ramps.
 	vector<DWORD> fx_palette(256, 0);
 	CreateColorRamp(fx_palette.data(), kFxFirstIndex + kRampLength + 1, kFxColor, 255 - kRampLength - 1, kFxColor);
-	CreateColorRamp(fx_palette.data(), kFxFirstIndex, kFxColor & 0xffffff, kFxFirstIndex + kRampLength, kFxColor);
-	CreateColorRamp(fx_palette.data(), 255 - kRampLength, kFxColor, 255, kFxColor & 0xffffff);
+	CreateColorRamp(fx_palette.data(), kFxFirstIndex, kFxColor, kFxFirstIndex + kRampLength, kFxColor);
+	CreateColorRamp(fx_palette.data(), 255 - kRampLength, kFxColor, 255, kFxColor);
 	
 	// Mix fx and texture palettes.
 	MixWithSLIPalette(texture, fx_palette.data());
@@ -341,6 +411,24 @@ int main() {
 	world.WorldDestructor = NULL;
 
 	SetActiveCamera(&camera);
+
+	const int num_bright_bands = static_cast<int>(distance_over_curve / kTextureHeightMeters);
+/*	
+	// Create SLIs to hold band masks.
+	band_frame_data = malloc(num_bright_bands * (kDisplayWidth * kDisplayHeight));
+	if (band_frame_data == NULL) {
+		error = -4;
+		goto error_exit;
+	}
+	for (int bi = 0; bi < num_bright_bands; ++bi) {
+		band_slis[bi] = CreateVoidSLI(kDisplayWidth, kDisplayHeight, 8, 1);
+		if (band_slis[bi] == NULL) {
+			error = -5;
+			goto error_exit;
+		}
+		SetFrameData(band_slis[bi], static_cast<BYTE *>(band_frame_data) + bi * (kDisplayWidth * kDisplayHeight));
+	}
+*/
 	
 	back_buffer = CreateSLI(kDisplayWidth, kDisplayHeight, kDisplayBpp, 1);
 	if (back_buffer == NULL) {
@@ -351,6 +439,9 @@ int main() {
 	if (error) {
 		goto error_exit;
 	}
+	
+	DWORD bright_band_palette[256];
+	CreateColorRamp(bright_band_palette, 0, 0xff000000, 255, 0xffffffff);
 	
 	float light_x = 0, light_y = 0, light_z = 0;	
 	float light_target_x = 0, light_target_y = 0, light_target_z = 0;	
@@ -366,7 +457,7 @@ int main() {
 		SetRenderMethode(RENDER_SOLID);
 		AnimateTexture(texture, original_texture, t);
 		RenderUniverse(&world, back_buffer);
-		MakeLightsGlow(back_buffer, pose_interpolator, camera, t, t_from_text_y, texture);
+		MakeLightsGlow(back_buffer, pose_interpolator, camera, t, t_from_text_y, texture, num_bright_bands, bright_band_palette);
 		Blit(GetVideoSLI(), back_buffer);
 		ShowPage();
 		GetElapsedTime();
@@ -376,10 +467,20 @@ int main() {
 	StopFrameRate();
 
 error_exit:
-	DestroyVideoSLI(3);
+	DestroyVideoSLI(3);	
 	if (error) {
 		printf("Error code: 0x%dhn\n", error);
 	}
+/*
+	if (band_frame_data != NULL) {
+		free(band_frame_data);
+	} 
+	{
+		for (int i = 0; i < num_bright_bands; ++i) {
+			DestroySLI(band_slis[i]);
+		}
+	}
+*/
 	if (back_buffer != NULL) {
 		DestroySLI(back_buffer);
 	}
