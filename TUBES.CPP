@@ -158,8 +158,10 @@ void MakeLightsGlow(SLI *sli, Pose3Interpolator &pose_interpolator, RENDERCAMERA
 	SLI *glow_sli_smoothed[16];
 	for (int h = 0; h < num_bands; ++h) {
 		glow_sli_smoothed[h] = CreateSLI(glow_sli[h]->SLIXSize, glow_sli[h]->SLIYSize, 8, 1);
-		SetPos(glow_sli_smoothed[h], glow_sli[h]->SLIPos.SLRR1.SLPX, glow_sli[h]->SLIPos.SLRR1.SLPY);
+		SetPos(glow_sli_smoothed[h], rect[h].SLRR1.SLPX, rect[h].SLRR1.SLPY); //glow_sli[h]->SLIPos.SLRR1.SLPX, glow_sli[h]->SLIPos.SLRR1.SLPY);
 		SetPalette(glow_sli_smoothed[h], (BYTE *)band_palette);
+		Soften8((BYTE *)GetCurrentFramePtr(glow_sli[h]) + glow_sli[h]->SLIXSize * 2, glow_sli[h]->SLIXSize, glow_sli[h]->SLIYSize - 4, (BYTE *)GetCurrentFramePtr(glow_sli_smoothed[h]) + glow_sli_smoothed[h]->SLIXSize * 2);
+		Soften8((BYTE *)GetCurrentFramePtr(glow_sli_smoothed[h]) + glow_sli_smoothed[h]->SLIXSize * 2, glow_sli_smoothed[h]->SLIXSize, glow_sli_smoothed[h]->SLIYSize - 4, (BYTE *)GetCurrentFramePtr(glow_sli[h]) + glow_sli[h]->SLIXSize * 2);
 		Soften8((BYTE *)GetCurrentFramePtr(glow_sli[h]) + glow_sli[h]->SLIXSize * 2, glow_sli[h]->SLIXSize, glow_sli[h]->SLIYSize - 4, (BYTE *)GetCurrentFramePtr(glow_sli_smoothed[h]) + glow_sli_smoothed[h]->SLIXSize * 2);
 		Soften8((BYTE *)GetCurrentFramePtr(glow_sli_smoothed[h]) + glow_sli_smoothed[h]->SLIXSize * 2, glow_sli_smoothed[h]->SLIXSize, glow_sli_smoothed[h]->SLIYSize - 4, (BYTE *)GetCurrentFramePtr(glow_sli[h]) + glow_sli[h]->SLIXSize * 2);
 		Soften8((BYTE *)GetCurrentFramePtr(glow_sli[h]) + glow_sli[h]->SLIXSize * 2, glow_sli[h]->SLIXSize, glow_sli[h]->SLIYSize - 4, (BYTE *)GetCurrentFramePtr(glow_sli_smoothed[h]) + glow_sli_smoothed[h]->SLIXSize * 2);
@@ -167,15 +169,16 @@ void MakeLightsGlow(SLI *sli, Pose3Interpolator &pose_interpolator, RENDERCAMERA
 	}
 	static DWORD band_rect_colors[] = { 0xffff0000, 0xff00ff00, 0xff0000ff };
 	for (int j = 0; j < num_bands; ++j) {
-		DrawLine(sli, rect[j].SLRR1.SLPX, rect[j].SLRR1.SLPY, rect[j].SLRR2.SLPX, rect[j].SLRR1.SLPY, band_rect_colors[j]);
-		DrawLine(sli, rect[j].SLRR1.SLPX, rect[j].SLRR1.SLPY, rect[j].SLRR1.SLPX, rect[j].SLRR2.SLPY, band_rect_colors[j]);
-		DrawLine(sli, rect[j].SLRR1.SLPX, rect[j].SLRR2.SLPY, rect[j].SLRR2.SLPX, rect[j].SLRR2.SLPY, band_rect_colors[j]);
-		DrawLine(sli, rect[j].SLRR2.SLPX, rect[j].SLRR1.SLPY, rect[j].SLRR2.SLPX, rect[j].SLRR2.SLPY, band_rect_colors[j]);		
+		// DrawLine(sli, rect[j].SLRR1.SLPX, rect[j].SLRR1.SLPY, rect[j].SLRR2.SLPX, rect[j].SLRR1.SLPY, band_rect_colors[j]);
+		// DrawLine(sli, rect[j].SLRR1.SLPX, rect[j].SLRR1.SLPY, rect[j].SLRR1.SLPX, rect[j].SLRR2.SLPY, band_rect_colors[j]);
+		// DrawLine(sli, rect[j].SLRR1.SLPX, rect[j].SLRR2.SLPY, rect[j].SLRR2.SLPX, rect[j].SLRR2.SLPY, band_rect_colors[j]);
+		// DrawLine(sli, rect[j].SLRR2.SLPX, rect[j].SLRR1.SLPY, rect[j].SLRR2.SLPX, rect[j].SLRR2.SLPY, band_rect_colors[j]);		
+		SetBlitType(glow_sli_smoothed[j], SLIBlitAddSaturate);
 		Blit(sli, glow_sli_smoothed[j]);
-		DrawLine(sli, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPY, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPY, band_rect_colors[j]);
-		DrawLine(sli, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPY, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPY, band_rect_colors[j]);
-		DrawLine(sli, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPY, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPY, band_rect_colors[j]);
-		DrawLine(sli, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPY, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPY, band_rect_colors[j]);		
+		// DrawLine(sli, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPY, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPY, band_rect_colors[j]);
+		// DrawLine(sli, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPY, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPY, band_rect_colors[j]);
+		// DrawLine(sli, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPY, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPY, band_rect_colors[j]);
+		// DrawLine(sli, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR1.SLPY, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPX, glow_sli_smoothed[j]->SLIPos.SLRR2.SLPY, band_rect_colors[j]);		
 		DestroySLI(glow_sli_smoothed[j]);
 	}
 }
