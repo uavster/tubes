@@ -93,8 +93,8 @@ void AnimateTexture(SLI *texture, SLI *original_texture, float new_time) {
 	}
 }
 
-void MakeLightsGlow(SLI *sli, Pose3Interpolator &pose_interpolator, RENDERCAMERA &camera, float time, Interpolator<float> &t_from_text_v, const SLI *texture_sli, int num_bands, DWORD *band_palette) {
-	DWORD *sli_data = static_cast<DWORD *>(GetCurrentFramePtr(sli));
+void MakeLightsGlow(SLI *sli, Pose3Interpolator &pose_interpolator, RENDERCAMERA &camera, float time, Interpolator<float> &t_from_text_v, const SLI *texture_sli, int num_bands, DWORD *band_palettes) {
+	BYTE *sli_data = static_cast<BYTE *>(GetCurrentFramePtr(sli));
 	int glow_sli_pos = 0;
 	SLR rect[16]; // Max bands
 	SLI *glow_sli[16]; // Max bands
@@ -124,7 +124,7 @@ void MakeLightsGlow(SLI *sli, Pose3Interpolator &pose_interpolator, RENDERCAMERA
 		}
 		for (int y = first_y; y < last_y; ++y) {
 			BYTE *glow_data_ptr0 = static_cast<BYTE *>(GetCurrentFramePtr(glow_sli[i])) + glow_sli[i]->SLIPitch * (y - first_y);
-			DWORD *p0 = &sli_data[sli->SLIPitch * y];
+			DWORD *p0 = reinterpret_cast<DWORD *>(&sli_data[sli->SLIPitch * y]);
 			const SPAN *span = GetFirstSpanInLine(sli, y);
 			while((DWORD)span != -1) {
 				if (span->SPX2 > first_x && span->SPX1 < last_x) {
@@ -159,7 +159,7 @@ void MakeLightsGlow(SLI *sli, Pose3Interpolator &pose_interpolator, RENDERCAMERA
 	for (int h = 0; h < num_bands; ++h) {
 		glow_sli_smoothed[h] = CreateSLI(glow_sli[h]->SLIXSize, glow_sli[h]->SLIYSize, 8, 1);
 		SetPos(glow_sli_smoothed[h], rect[h].SLRR1.SLPX, rect[h].SLRR1.SLPY); //glow_sli[h]->SLIPos.SLRR1.SLPX, glow_sli[h]->SLIPos.SLRR1.SLPY);
-		SetPalette(glow_sli_smoothed[h], (BYTE *)band_palette);
+		SetPalette(glow_sli_smoothed[h], &band_palettes[h << 8]);
 		Soften8((BYTE *)GetCurrentFramePtr(glow_sli[h]) + glow_sli[h]->SLIXSize * 2, glow_sli[h]->SLIXSize, glow_sli[h]->SLIYSize - 4, (BYTE *)GetCurrentFramePtr(glow_sli_smoothed[h]) + glow_sli_smoothed[h]->SLIXSize * 2);
 		Soften8((BYTE *)GetCurrentFramePtr(glow_sli_smoothed[h]) + glow_sli_smoothed[h]->SLIXSize * 2, glow_sli_smoothed[h]->SLIXSize, glow_sli_smoothed[h]->SLIYSize - 4, (BYTE *)GetCurrentFramePtr(glow_sli[h]) + glow_sli[h]->SLIXSize * 2);
 		Soften8((BYTE *)GetCurrentFramePtr(glow_sli[h]) + glow_sli[h]->SLIXSize * 2, glow_sli[h]->SLIXSize, glow_sli[h]->SLIYSize - 4, (BYTE *)GetCurrentFramePtr(glow_sli_smoothed[h]) + glow_sli_smoothed[h]->SLIXSize * 2);
@@ -443,8 +443,15 @@ int main() {
 		goto error_exit;
 	}
 	
-	DWORD bright_band_palette[256];
-	CreateColorRamp(bright_band_palette, 0, 0xff000000, 255, 0xffffffff);
+	DWORD *bright_band_palettes = new DWORD[256 * num_bright_bands];
+	{
+		for (int i = 0; i < num_bright_bands; ++i) {
+			DWORD color_to_boost = 0xff << (i * 8);
+			CreateColorRamp(&bright_band_palettes[i << 8], 0, 0xff000000, 32, 0xff808080 | color_to_boost);
+			CreateColorRamp(&bright_band_palettes[i << 8], 32, 0xff808080 | color_to_boost, 255, 0xffffffff);
+		}
+	}
+	// CreateColorRamp(bright_band_palette, 0, 0xff000000, 255, 0xffffffff);
 	
 	float light_x = 0, light_y = 0, light_z = 0;	
 	float light_target_x = 0, light_target_y = 0, light_target_z = 0;	
@@ -460,7 +467,7 @@ int main() {
 		SetRenderMethode(RENDER_SOLID);
 		AnimateTexture(texture, original_texture, t);
 		RenderUniverse(&world, back_buffer);
-		MakeLightsGlow(back_buffer, pose_interpolator, camera, t, t_from_text_y, texture, num_bright_bands, bright_band_palette);
+		MakeLightsGlow(back_buffer, pose_interpolator, camera, t, t_from_text_y, texture, num_bright_bands, bright_band_palettes);
 		Blit(GetVideoSLI(), back_buffer);
 		ShowPage();
 		GetElapsedTime();
@@ -468,6 +475,8 @@ int main() {
 		IncFrameCounter();
 	}
 	StopFrameRate();
+	
+	delete [] bright_band_palettes;
 
 error_exit:
 	DestroyVideoSLI(3);	
